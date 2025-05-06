@@ -17,7 +17,12 @@ const {
 
 const authenticator = async () => {
   try {
-    const response = await fetch(`${config.env.apiEndpoint}/api/auth/imagekit`);
+    const baseURL = typeof window === 'undefined'
+  ? process.env.NEXT_PUBLIC_API_ENDPOINT || ''
+  : '';
+
+  const response = await fetch(`${baseURL}/api/auth/imagekit`);
+
 
     if (!response.ok) {
       const errorText = await response.text();
