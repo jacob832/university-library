@@ -1,51 +1,24 @@
 "use server";
 
+import { hash } from "bcryptjs";
 import { eq } from "drizzle-orm";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+
+import { signIn } from "@/auth";
 import { db } from "@/database/drizzle";
 import { users } from "@/database/schema";
-import { hash } from "bcryptjs";
-import { signIn } from "@/auth";
-import { headers } from "next/headers";
-import ratelimit from "@/lib/ratelimit";
-import { redirect } from "next/navigation";
-import { workflowClient } from "@/lib/workflow";
-import config from "@/lib/config";
 
-export const signInWithCredentials = async (
-  params: Pick<AuthCredentials, "email" | "password">,
-) => {
-  const { email, password } = params;
+import config from "../config";
+import ratelimit from "../ratelimit";
+import { workflowClient } from "../workflow";
 
-  const ip = (await headers()).get("x-forwarded-for") || "127.0.0.1";
-   const { success } = await ratelimit.limit(ip);
-
-  if (!success) return redirect("/too-fast");
-
-  try {
-    const result = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
-
-    if (result?.error) {
-      return { success: false, error: result.error };
-    }
-
-    return { success: true };
-  } catch (error) {
-    console.log(error, "Signin error");
-    return { success: false, error: "Signin error" };
-  }
-};
-
-export const signUp = async (params: AuthCredentials) => {
-  const { fullName, email, universityId, password, universityCard } = params;
+export async function signUp(params: AuthCredentails) {
+  const { fullname, email, universityId, password, universityCard } = params;
 
   const ip = (await headers()).get("x-forwarded-for") || "127.0.0.1";
   const { success } = await ratelimit.limit(ip);
-
-   if (!success) return redirect("/too-fast");
+  if (!success) return redirect("/too-fast");
 
   const existingUser = await db
     .select()
@@ -61,7 +34,7 @@ export const signUp = async (params: AuthCredentials) => {
 
   try {
     await db.insert(users).values({
-      fullName,
+      fullname,
       email,
       universityId,
       password: hashedPassword,
@@ -69,18 +42,52 @@ export const signUp = async (params: AuthCredentials) => {
     });
 
     await workflowClient.trigger({
-      url: `${config.env.prodApiEndpoint}/api/workflows/onboarding`,
+      url: `${config.env.prodApiEndpoint}/api/workflow/onboarding`,
       body: {
         email,
-        fullName,
+        fullname,
       },
     });
 
+    // sign in on behalf of the new user
     await signInWithCredentials({ email, password });
 
     return { success: true };
   } catch (error) {
-    console.log(error, "Signup error");
-    return { success: false, error: "Signup error" };
+    console.error("Error in signup:", error);
+    return {
+      success: false,
+      error: `An error occurred during sign up. ${error}`,
+    };
   }
-};
+}
+
+export async function signInWithCredentials(
+  params: Pick<AuthCredentails, "email" | "password">
+) {
+  const { email, password } = params;
+
+  const ip = (await headers()).get("x-forwarded-for") || "127.0.0.1";
+  const { success } = await ratelimit.limit(ip);
+  if (!success) return redirect("/too-fast");
+
+  try {
+    const result = await signIn("credentials", {
+      email,
+      password,
+      redirect: false,
+    });
+
+    if (result?.error) {
+      return { success: false, error: "Invalid email or password" };
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error("Error in signin:", error);
+    return {
+      success: false,
+      error: `An error occurred during sign in. ${error}`,
+    };
+  }
+}
